@@ -72,10 +72,14 @@ if (Test-Path "$env:USERPROFILE\Downloads\desktop-app-logo-started.png") {
     Copy-Item "$env:USERPROFILE\Downloads\icons\desktop-app-logo-started.png" -Destination "src\main\resources\" -Force
 }
 
-if (Test-Path "$env:USERPROFILE\Downloads\icon-app-desktop.ico") {
-    Copy-Item "$env:USERPROFILE\Downloads\icon-app-desktop.ico" -Destination "src\main\resources\" -Force
+if (Test-Path "$env:USERPROFILE\Downloads\icon-app-desktop-hd.ico") {
+    Copy-Item "$env:USERPROFILE\Downloads\icon-app-desktop-hd.ico" -Destination "src\main\resources\icon-app-desktop.ico" -Force
+} elseif (Test-Path "$env:USERPROFILE\Downloads\icons\icon-app-desktop-hd.ico") {
+    Copy-Item "$env:USERPROFILE\Downloads\icons\icon-app-desktop-hd.ico" -Destination "src\main\resources\icon-app-desktop.ico" -Force
+} elseif (Test-Path "$env:USERPROFILE\Downloads\icon-app-desktop.ico") {
+    Copy-Item "$env:USERPROFILE\Downloads\icon-app-desktop.ico" -Destination "src\main\resources\icon-app-desktop.ico" -Force
 } elseif (Test-Path "$env:USERPROFILE\Downloads\icons\icon-app-desktop.ico") {
-    Copy-Item "$env:USERPROFILE\Downloads\icons\icon-app-desktop.ico" -Destination "src\main\resources\" -Force
+    Copy-Item "$env:USERPROFILE\Downloads\icons\icon-app-desktop.ico" -Destination "src\main\resources\icon-app-desktop.ico" -Force
 }
 
 if (Test-Path "$env:USERPROFILE\Downloads\icon-app-desktop.png") {
