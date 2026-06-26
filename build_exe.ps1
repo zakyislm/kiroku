@@ -101,9 +101,12 @@ Write-Host ""
 Write-Host "[3/5] Compiling source files..." -ForegroundColor Yellow
 
 # Clean target folders (keep target/wix so we don't redownload Wix Toolset)
-if (Test-Path target/classes) { Remove-Item target/classes -Recurse -Force }
-if (Test-Path target/libs) { Remove-Item target/libs -Recurse -Force }
-if (Test-Path target/dist) { Remove-Item target/dist -Recurse -Force }
+try { if (Test-Path target/classes) { Remove-Item target/classes -Recurse -Force -ErrorAction Stop } } catch {}
+try { if (Test-Path target/libs) { Remove-Item target/libs -Recurse -Force -ErrorAction Stop } } catch {}
+try { if (Test-Path target/dist) { Remove-Item target/dist -Recurse -Force -ErrorAction Stop } } catch {}
+try { if (Test-Path target/wix-temp) { Remove-Item target/wix-temp -Recurse -Force -ErrorAction Stop } } catch {
+    Write-Host "Warning: Could not fully clean target/wix-temp. Some files may be locked by another process." -ForegroundColor Yellow
+}
 
 New-Item -ItemType Directory -Path target/classes -Force | Out-Null
 New-Item -ItemType Directory -Path target/libs -Force | Out-Null
@@ -185,10 +188,17 @@ if ($Type -eq "run") {
       --type $Type `
       --win-dir-chooser `
       --win-shortcut `
+      --win-shortcut-prompt `
       --win-menu `
       --win-menu-group "Kiroku" `
       --icon src/main/resources/icon-app-desktop.ico `
-      --dest target/dist
+      --add-launcher "Kiroku Uninstaller=src/main/resources/uninstaller.properties" `
+      --dest target/dist `
+      --temp target/wix-temp
+      
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "jpackage failed to build installer."
+    }
       
     Write-Host ""
     Write-Host "====================================================" -ForegroundColor Green
@@ -205,6 +215,7 @@ if ($Type -eq "run") {
       --main-class io.github.zakyislm.kiroku.Main `
       --type app-image `
       --icon src/main/resources/icon-app-desktop.ico `
+      --add-launcher "Kiroku Uninstaller=src/main/resources/uninstaller.properties" `
       --dest target/dist
       
     Write-Host ""

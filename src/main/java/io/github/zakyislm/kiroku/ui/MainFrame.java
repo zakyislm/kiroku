@@ -7,6 +7,9 @@ import io.github.zakyislm.kiroku.monitor.WindowMonitor;
 import io.github.zakyislm.kiroku.server.LocalServer;
 import io.github.zakyislm.kiroku.utils.BrowserDetector;
 import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseMotionAdapter;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
@@ -54,11 +57,11 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
     private JLabel intervalLabel;
 
     public MainFrame() {
+        setUndecorated(true);
         applyDarkTheme();
 
         setTitle("kiroku");
         setSize(400, 680);
-        setResizable(true);
         setMinimumSize(new Dimension(380, 500));
         setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         setLocationRelativeTo(null);
@@ -68,6 +71,11 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
         if (windowIconUrl != null) {
             setIconImage(new ImageIcon(windowIconUrl).getImage());
         }
+
+        // Setup custom resize and drag listeners
+        FrameResizeListener resizeListener = new FrameResizeListener(this);
+        addMouseListener(resizeListener);
+        addMouseMotionListener(resizeListener);
         
         // Window Listener for Minimize to Tray or Exit
         addWindowListener(new WindowAdapter() {
@@ -98,7 +106,6 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
         // Setup System Tray
         setupSystemTray();
         
-        // Enable Immersive Dark Mode for Windows Frame/Title Bar using JNA
         addNotify();
         enableDarkTitleBar();
 
@@ -135,6 +142,10 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
         setLayout(new BorderLayout());
         getContentPane().setBackground(BG_COLOR);
 
+        // Add 1px border and margins for dragging/resizing
+        getRootPane().setBorder(BorderFactory.createLineBorder(BORDER_COLOR, 1));
+        ((JComponent)getContentPane()).setBorder(BorderFactory.createEmptyBorder(0, 4, 4, 4));
+
         AppConfig config = ConfigManager.getConfig();
 
         // --- TOP HEADER PANEL ---
@@ -142,48 +153,13 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
         headerPanel.setBackground(BG_COLOR);
         headerPanel.setBorder(BorderFactory.createEmptyBorder(12, 0, 12, 0));
 
-        // Logo + App Name
+        // Logo + App Name (Replaced with simple text label)
         JPanel logoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         logoPanel.setBackground(BG_COLOR);
-        
-        JLabel logoLabel = new JLabel();
-        java.net.URL imgUrl = MainFrame.class.getResource("/desktop-app-logo-started.png");
-        if (imgUrl != null) {
-            ImageIcon rawIcon = new ImageIcon(imgUrl);
-            Image img = rawIcon.getImage();
-            int width = img.getWidth(null);
-            int height = img.getHeight(null);
-            if (width > 0 && height > 0) {
-                int scaledWidth = (int) (24.0 * width / height);
-                Image scaledImg = img.getScaledInstance(scaledWidth, 24, Image.SCALE_SMOOTH);
-                logoLabel.setIcon(new ImageIcon(scaledImg));
-            } else {
-                logoLabel.setIcon(rawIcon);
-            }
-            logoPanel.add(logoLabel);
-        } else {
-            JPanel logoIcon = new JPanel() {
-                @Override
-                protected void paintComponent(Graphics g) {
-                    super.paintComponent(g);
-                    Graphics2D g2 = (Graphics2D) g.create();
-                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                    g2.setColor(Color.WHITE);
-                    g2.fillOval(0, 0, 20, 20);
-                    g2.setColor(BG_COLOR);
-                    g2.setFont(new Font("Segoe UI", Font.BOLD, 10));
-                    g2.drawString("ki", 5, 14);
-                    g2.dispose();
-                }
-            };
-            logoIcon.setPreferredSize(new Dimension(20, 20));
-            logoIcon.setBackground(BG_COLOR);
-            logoPanel.add(logoIcon);
-        }
 
-        JLabel textLabel = new JLabel("kiroku");
-        textLabel.setFont(new Font("Montserrat", Font.BOLD, 18));
-        textLabel.setForeground(TEXT_PRIMARY);
+        JLabel textLabel = new JLabel("monitoring status");
+        textLabel.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        textLabel.setForeground(TEXT_MUTED);
         logoPanel.add(textLabel);
         
         headerPanel.add(logoPanel, BorderLayout.WEST);
@@ -214,6 +190,8 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
         wrapper.add(createStatusView(headerPanel));
 
         JScrollPane mainScroll = createScrollPane(wrapper);
+        
+        add(createCustomTitleBar(this, "kiroku", true), BorderLayout.NORTH);
         add(mainScroll, BorderLayout.CENTER);
     }
 
@@ -281,10 +259,10 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
             ScreenshotEngine.CaptureResult res = ScreenshotEngine.captureScreen(config.rootDir);
             if (res.success) {
                 log("saved: " + res.file.getName() + " (#" + res.id + ")");
-                JOptionPane.showMessageDialog(this, "screenshot captured successfully: " + res.file.getName(), "captured", JOptionPane.INFORMATION_MESSAGE);
+                showCaptureNotificationDialog(res.file.getName());
             } else {
                 log("error: " + res.errorMessage);
-                JOptionPane.showMessageDialog(this, "capture failed: " + res.errorMessage, "error", JOptionPane.ERROR_MESSAGE);
+                showTextDialog("capture failed: " + res.errorMessage, "error", true);
             }
         });
         statusRow.add(takeNowBtn, BorderLayout.EAST);
@@ -312,7 +290,7 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
                 int delay = Integer.parseInt(delayField.getText());
                 int count = Integer.parseInt(countField.getText());
                 if (delay < 0 || count < 1) {
-                    JOptionPane.showMessageDialog(this, "delay must be >= 0 and count must be >= 1.", "validation error", JOptionPane.ERROR_MESSAGE);
+                    showTextDialog("delay must be >= 0 and count must be >= 1.", "validation error", true);
                     return;
                 }
                 config.timerMinutes = delay;
@@ -320,9 +298,9 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
                 config.screenshotMode = modeCombo.getSelectedItem().equals("simultaneous") ? "serentak" : "bertahap";
                 ConfigManager.saveConfig();
                 log("timer settings applied: delay=" + delay + ", count=" + count + ", mode=" + config.screenshotMode);
-                JOptionPane.showMessageDialog(this, "timer settings applied successfully.", "success", JOptionPane.INFORMATION_MESSAGE);
+                showTextDialog("timer settings applied successfully.", "success", false);
             } catch (NumberFormatException ex) {
-                JOptionPane.showMessageDialog(this, "please enter valid numbers for delay and count.", "validation error", JOptionPane.ERROR_MESSAGE);
+                showTextDialog("please enter valid numbers for delay and count.", "validation error", true);
             }
         });
         timerHeader.add(applyBtn, BorderLayout.EAST);
@@ -504,19 +482,7 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
         JButton browseButton = new JButton("browse");
         styleButton(browseButton);
         browseButton.setPreferredSize(new Dimension(80, 24));
-        browseButton.addActionListener(e -> {
-            JFileChooser chooser = new JFileChooser();
-            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-            chooser.setCurrentDirectory(new File(config.rootDir));
-            int result = chooser.showOpenDialog(this);
-            if (result == JFileChooser.APPROVE_OPTION) {
-                String path = chooser.getSelectedFile().getAbsolutePath();
-                folderPathLabel.setText(path);
-                config.rootDir = path;
-                ConfigManager.saveConfig();
-                log("save directory updated to: " + path);
-            }
-        });
+        browseButton.addActionListener(e -> showOpenChooser());
         folderRow.add(browseButton, BorderLayout.EAST);
         addToCard(folderCard, folderRow);
         addToCard(folderCard, Box.createVerticalStrut(8));
@@ -698,13 +664,12 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
                 
                 JButton deleteBtn = createTextButton("delete", ERROR_COLOR);
                 deleteBtn.addActionListener(e -> {
-                    int confirm = JOptionPane.showConfirmDialog(this, "delete " + entry.name.toLowerCase() + "?", "confirm delete", JOptionPane.YES_NO_OPTION);
-                    if (confirm == JOptionPane.YES_OPTION) {
+                    showDeleteConfirmDialog(entry.name, entry.id, "URL_RECORD", () -> {
                         config.whitelist.remove(index);
                         ConfigManager.saveConfig();
                         log("deleted whitelist: " + entry.name.toLowerCase());
                         rebuildWhitelistRows();
-                    }
+                    });
                 });
                 actions.add(deleteBtn);
                 
@@ -905,81 +870,14 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
     }
 
     private void addWhitelistDialog() {
-        JTextField nameField = new JTextField();
-        JTextField hostField = new JTextField();
-        JCheckBox requirePatternCheckBox = new JCheckBox("require room/meeting pattern (auto-regex)", true);
-        requirePatternCheckBox.setIcon(new CustomCheckboxIcon(false));
-        requirePatternCheckBox.setSelectedIcon(new CustomCheckboxIcon(true));
-        
-        Object[] message = {
-            "name (e.g. google meet):", nameField,
-            "base url (e.g. meet.google.com):", hostField,
-            "", requirePatternCheckBox
-        };
-
-        int option = JOptionPane.showConfirmDialog(this, message, "add whitelist entry", JOptionPane.OK_CANCEL_OPTION);
-        if (option == JOptionPane.OK_OPTION) {
-            String name = nameField.getText().trim();
-            String host = hostField.getText().trim();
-            boolean requirePattern = requirePatternCheckBox.isSelected();
-
-            if (name.isEmpty() || host.isEmpty()) {
-                JOptionPane.showMessageDialog(this, "name and base url cannot be empty.", "error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-
-            AppConfig.WhitelistEntry entry = new AppConfig.WhitelistEntry();
-            entry.id = Long.toString(System.currentTimeMillis()) + "_" + (int)(Math.random() * 1000);
-            entry.name = name;
-            entry.baseUrl = host;
-            entry.hasParameter = requirePattern;
-            entry.parameterPattern = requirePattern ? getAutomaticPattern(host) : "";
-            entry.enabled = true;
-
-            ConfigManager.getConfig().whitelist.add(entry);
-            ConfigManager.saveConfig();
-            log("added whitelist: " + name.toLowerCase());
-            rebuildWhitelistRows();
-        }
+        showWhitelistDialog(null, false, -1);
     }
 
     private void editWhitelistDialog(int selectedIdx) {
         if (selectedIdx < 0) return;
         AppConfig config = ConfigManager.getConfig();
         AppConfig.WhitelistEntry entry = config.whitelist.get(selectedIdx);
-
-        JTextField nameField = new JTextField(entry.name);
-        JTextField hostField = new JTextField(entry.baseUrl);
-        JCheckBox requirePatternCheckBox = new JCheckBox("require room/meeting pattern (auto-regex)", entry.hasParameter);
-        requirePatternCheckBox.setIcon(new CustomCheckboxIcon(false));
-        requirePatternCheckBox.setSelectedIcon(new CustomCheckboxIcon(true));
-        
-        Object[] message = {
-            "name (e.g. google meet):", nameField,
-            "base url (e.g. meet.google.com):", hostField,
-            "", requirePatternCheckBox
-        };
-
-        int option = JOptionPane.showConfirmDialog(this, message, "edit whitelist entry", JOptionPane.OK_CANCEL_OPTION);
-        if (option == JOptionPane.OK_OPTION) {
-            String name = nameField.getText().trim();
-            String host = hostField.getText().trim();
-            boolean requirePattern = requirePatternCheckBox.isSelected();
-
-            if (name.isEmpty() || host.isEmpty()) {
-                JOptionPane.showMessageDialog(this, "name and base url cannot be empty.", "error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-
-            entry.name = name;
-            entry.baseUrl = host;
-            entry.hasParameter = requirePattern;
-            entry.parameterPattern = requirePattern ? getAutomaticPattern(host) : "";
-
-            ConfigManager.saveConfig();
-            log("edited whitelist: " + name.toLowerCase());
-            rebuildWhitelistRows();
-        }
+        showWhitelistDialog(entry, true, selectedIdx);
     }
 
     private void updateStartupShortcut(boolean enable) {
@@ -1081,9 +979,6 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
 
     private void minimizeToTray() {
         setVisible(false);
-        if (trayIcon != null) {
-            trayIcon.displayMessage("kiroku", "running in the background. double click tray icon to open.", TrayIcon.MessageType.INFO);
-        }
     }
 
     public void log(String message) {
@@ -1117,12 +1012,6 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
     @Override
     public void onWindowMatchFound(String matchName, String windowTitle) {
         log(String.format("match: window '%s' detected (matches whitelist: '%s')", windowTitle.toLowerCase(), matchName.toLowerCase()));
-        if (trayIcon != null) {
-            AppConfig config = ConfigManager.getConfig();
-            trayIcon.displayMessage("kiroku — meeting detected", 
-                String.format("meeting '%s' detected. scheduling capture in %d min.", matchName.toLowerCase(), config.timerMinutes), 
-                TrayIcon.MessageType.INFO);
-        }
     }
 
     @Override
@@ -1130,6 +1019,7 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
         if (trayIcon != null) {
             trayIcon.displayMessage("kiroku — captured", "screenshot saved: " + new File(filePath).getName(), TrayIcon.MessageType.INFO);
         }
+        SwingUtilities.invokeLater(() -> showCaptureNotificationDialog(new File(filePath).getName()));
     }
 
     // --- CUSTOM SWING COMPONENTS / OVERRIDES ---
@@ -1265,6 +1155,775 @@ public class MainFrame extends JFrame implements LocalServer.ServerListener, Win
             int y = 0;
 
             child.setBounds(x, y, childW, childH);
+        }
+    }
+
+    // --- CUSTOM TITLE BAR & POPUP DIALOG METHODS ---
+
+    private JPanel createCustomTitleBar(Window window, String title, boolean showMinimize) {
+        JPanel titleBar = new JPanel(new BorderLayout());
+        titleBar.setBackground(Color.BLACK);
+        titleBar.setPreferredSize(new Dimension(window.getWidth(), 32));
+        titleBar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_COLOR));
+
+        // Dragging support
+        final Point[] dragOffset = {null};
+        titleBar.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                dragOffset[0] = e.getPoint();
+            }
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2 && window instanceof Frame && showMinimize) {
+                    Frame frame = (Frame) window;
+                    int state = frame.getExtendedState();
+                    if ((state & Frame.MAXIMIZED_BOTH) == Frame.MAXIMIZED_BOTH) {
+                        frame.setExtendedState(Frame.NORMAL);
+                    } else {
+                        frame.setExtendedState(Frame.MAXIMIZED_BOTH);
+                    }
+                    frame.revalidate();
+                    frame.repaint();
+                }
+            }
+        });
+        titleBar.addMouseMotionListener(new MouseMotionAdapter() {
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                if (dragOffset[0] != null) {
+                    if (window instanceof Frame && (((Frame) window).getExtendedState() & Frame.MAXIMIZED_BOTH) == Frame.MAXIMIZED_BOTH) {
+                        return;
+                    }
+                    Point curr = e.getLocationOnScreen();
+                    window.setLocation(curr.x - dragOffset[0].x, curr.y - dragOffset[0].y);
+                }
+            }
+        });
+
+        // Left section: Logo + Title text
+        JPanel leftPanel = new JPanel(new GridBagLayout());
+        leftPanel.setBackground(Color.BLACK);
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.anchor = GridBagConstraints.CENTER;
+        gbc.insets = new Insets(0, 8, 0, 0);
+
+        java.net.URL logoUrl = MainFrame.class.getResource("/desktop-app-logo-started.png");
+        if (logoUrl != null) {
+            ImageIcon icon = new ImageIcon(new ImageIcon(logoUrl).getImage().getScaledInstance(16, 16, Image.SCALE_SMOOTH));
+            JLabel logoLabel = new JLabel(icon);
+            leftPanel.add(logoLabel, gbc);
+            gbc.gridx++;
+        }
+
+        JLabel titleLabel = new JLabel(title.toLowerCase());
+        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        titleLabel.setForeground(TEXT_PRIMARY);
+        gbc.insets = new Insets(0, 8, 0, 8);
+        leftPanel.add(titleLabel, gbc);
+
+        titleBar.add(leftPanel, BorderLayout.WEST);
+
+        // Right section: Minimize, Maximize & Close buttons
+        JPanel rightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        rightPanel.setBackground(Color.BLACK);
+
+        if (showMinimize) {
+            TitleBarButton minBtn = new TitleBarButton(TitleBarButton.Type.MINIMIZE, window);
+            minBtn.addActionListener(e -> {
+                if (window instanceof Frame) {
+                    ((Frame) window).setExtendedState(Frame.ICONIFIED);
+                }
+            });
+            rightPanel.add(minBtn);
+
+            TitleBarButton maxBtn = new TitleBarButton(TitleBarButton.Type.MAXIMIZE, window);
+            maxBtn.addActionListener(e -> {
+                if (window instanceof Frame) {
+                    Frame frame = (Frame) window;
+                    int state = frame.getExtendedState();
+                    if ((state & Frame.MAXIMIZED_BOTH) == Frame.MAXIMIZED_BOTH) {
+                        frame.setExtendedState(Frame.NORMAL);
+                    } else {
+                        frame.setExtendedState(Frame.MAXIMIZED_BOTH);
+                    }
+                    frame.revalidate();
+                    frame.repaint();
+                }
+            });
+            rightPanel.add(maxBtn);
+        }
+
+        TitleBarButton closeBtn = new TitleBarButton(TitleBarButton.Type.CLOSE, window);
+        closeBtn.addActionListener(e -> {
+            if (window instanceof MainFrame) {
+                window.dispatchEvent(new WindowEvent(window, WindowEvent.WINDOW_CLOSING));
+            } else {
+                window.setVisible(false);
+                window.dispose();
+            }
+        });
+        rightPanel.add(closeBtn);
+
+        titleBar.add(rightPanel, BorderLayout.EAST);
+        return titleBar;
+    }
+
+    private static class TitleBarButton extends JButton {
+        public enum Type { MINIMIZE, MAXIMIZE, CLOSE }
+        private final Type type;
+        private final Window window;
+
+        public TitleBarButton(Type type, Window window) {
+            this.type = type;
+            this.window = window;
+            setFocusPainted(false);
+            setBorderPainted(false);
+            setContentAreaFilled(false);
+            setOpaque(true);
+            setBackground(Color.BLACK);
+            setForeground(Color.WHITE);
+            setPreferredSize(new Dimension(46, 31));
+            setCursor(new Cursor(Cursor.HAND_CURSOR));
+
+            addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseEntered(MouseEvent e) {
+                    if (type == Type.CLOSE) {
+                        setBackground(new Color(0xe8, 0x11, 0x23)); // Windows Red
+                        setForeground(Color.WHITE);
+                    } else {
+                        setBackground(new Color(0x22, 0x22, 0x22)); // Dark Grey
+                        setForeground(Color.WHITE);
+                    }
+                }
+
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    setBackground(Color.BLACK);
+                    setForeground(Color.WHITE);
+                }
+            });
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(getForeground());
+
+            int w = getWidth();
+            int h = getHeight();
+
+            if (type == Type.MINIMIZE) {
+                int lineW = 10;
+                int x = (w - lineW) / 2;
+                int y = h / 2;
+                g2.drawLine(x, y, x + lineW, y);
+            } else if (type == Type.MAXIMIZE) {
+                boolean isMaximized = false;
+                if (window instanceof Frame) {
+                    isMaximized = (((Frame) window).getExtendedState() & Frame.MAXIMIZED_BOTH) == Frame.MAXIMIZED_BOTH;
+                }
+                if (isMaximized) {
+                    int size = 8;
+                    int x1 = (w - size) / 2 + 2;
+                    int y1 = (h - size) / 2 - 2;
+                    g2.drawRect(x1, y1, size - 1, size - 1);
+
+                    int x2 = (w - size) / 2 - 2;
+                    int y2 = (h - size) / 2 + 2;
+                    g2.setColor(getBackground());
+                    g2.fillRect(x2, y2, size, size);
+                    g2.setColor(getForeground());
+                    g2.drawRect(x2, y2, size - 1, size - 1);
+                } else {
+                    int size = 10;
+                    int x = (w - size) / 2;
+                    int y = (h - size) / 2;
+                    g2.drawRect(x, y, size - 1, size - 1);
+                }
+            } else if (type == Type.CLOSE) {
+                int size = 10;
+                int x = (w - size) / 2;
+                int y = (h - size) / 2;
+                g2.drawLine(x, y, x + size - 1, y + size - 1);
+                g2.drawLine(x + size - 1, y, x, y + size - 1);
+            }
+
+            g2.dispose();
+        }
+    }
+
+
+    private void showCaptureNotificationDialog(String fileName) {
+        JDialog dialog = new JDialog(this, "kiroku", false);
+        dialog.setUndecorated(true);
+        dialog.setSize(360, 140);
+        dialog.setLayout(new BorderLayout());
+        dialog.getContentPane().setBackground(BG_COLOR);
+        
+        JPanel titleBar = createCustomTitleBar(dialog, "kiroku", false);
+        dialog.add(titleBar, BorderLayout.NORTH);
+        
+        JPanel content = new JPanel(new BorderLayout(16, 0));
+        content.setBackground(BG_COLOR);
+        content.setBorder(BorderFactory.createEmptyBorder(16, 16, 12, 16));
+        
+        // Painted Phone Outline Icon
+        JPanel phoneIconPanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(Color.WHITE);
+                // phone outline
+                g2.drawRoundRect(10, 4, 20, 38, 5, 5);
+                // screen border
+                g2.drawRect(12, 8, 16, 30);
+                // camera notch
+                g2.fillRect(17, 6, 6, 1);
+                g2.dispose();
+            }
+        };
+        phoneIconPanel.setPreferredSize(new Dimension(40, 44));
+        phoneIconPanel.setBackground(BG_COLOR);
+        content.add(phoneIconPanel, BorderLayout.WEST);
+        
+        JPanel textPanel = new JPanel();
+        textPanel.setLayout(new BoxLayout(textPanel, BoxLayout.Y_AXIS));
+        textPanel.setBackground(BG_COLOR);
+        
+        JLabel messageLabel = new JLabel("screenshot captured successfully");
+        messageLabel.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        messageLabel.setForeground(TEXT_PRIMARY);
+        messageLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        textPanel.add(messageLabel);
+        textPanel.add(Box.createVerticalStrut(4));
+        
+        JLabel fileLabel = new JLabel(fileName);
+        fileLabel.setFont(new Font("Consolas", Font.PLAIN, 11));
+        fileLabel.setForeground(TEXT_MUTED);
+        fileLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        textPanel.add(fileLabel);
+        
+        content.add(textPanel, BorderLayout.CENTER);
+        dialog.add(content, BorderLayout.CENTER);
+        
+        // Footer (OK Button and bottom 2px white line)
+        JPanel bottomArea = new JPanel();
+        bottomArea.setLayout(new BoxLayout(bottomArea, BoxLayout.Y_AXIS));
+        bottomArea.setBackground(BG_COLOR);
+        
+        JPanel footerRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 16, 8));
+        footerRow.setBackground(BG_COLOR);
+        
+        JButton okBtn = new JButton("OK");
+        styleDialogButton(okBtn, true);
+        okBtn.setPreferredSize(new Dimension(80, 24));
+        okBtn.addActionListener(e -> {
+            dialog.setVisible(false);
+            dialog.dispose();
+        });
+        footerRow.add(okBtn);
+        bottomArea.add(footerRow);
+        
+        // Bottom 2px white line
+        JPanel accentLine = new JPanel();
+        accentLine.setBackground(Color.WHITE);
+        accentLine.setPreferredSize(new Dimension(360, 2));
+        accentLine.setMaximumSize(new Dimension(Integer.MAX_VALUE, 2));
+        bottomArea.add(accentLine);
+        
+        dialog.add(bottomArea, BorderLayout.SOUTH);
+        dialog.getRootPane().setBorder(BorderFactory.createLineBorder(BORDER_COLOR, 1));
+        
+        // Position at bottom right corner of the screen
+        GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
+        Rectangle screenRect = ge.getMaximumWindowBounds();
+        int x = screenRect.x + screenRect.width - dialog.getWidth() - 20;
+        int y = screenRect.y + screenRect.height - dialog.getHeight() - 20;
+        dialog.setLocation(x, y);
+        
+        // Auto close after 3 seconds
+        javax.swing.Timer timer = new javax.swing.Timer(3000, evt -> {
+            dialog.setVisible(false);
+            dialog.dispose();
+        });
+        timer.setRepeats(false);
+        timer.start();
+        
+        dialog.setVisible(true);
+    }
+
+    private void showDeleteConfirmDialog(String name, String id, String type, Runnable onConfirm) {
+        JDialog dialog = new JDialog(this, "confirm delete", true);
+        dialog.setUndecorated(true);
+        dialog.setSize(400, 220);
+        dialog.setLayout(new BorderLayout());
+        dialog.getContentPane().setBackground(BG_COLOR);
+        
+        JPanel titleBar = createCustomTitleBar(dialog, "confirm delete", false);
+        dialog.add(titleBar, BorderLayout.NORTH);
+        
+        JPanel content = new JPanel();
+        content.setLayout(new BorderLayout(16, 0));
+        content.setBackground(BG_COLOR);
+        content.setBorder(BorderFactory.createEmptyBorder(16, 24, 16, 24));
+        
+        // Warning Icon Panel (triangle)
+        JPanel warningIconPanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(Color.WHITE);
+                int[] xPoints = {24, 4, 44};
+                int[] yPoints = {6, 40, 40};
+                g2.drawPolygon(xPoints, yPoints, 3);
+                g2.setFont(new Font("Segoe UI", Font.BOLD, 20));
+                g2.drawString("!", 22, 33);
+                g2.dispose();
+            }
+        };
+        warningIconPanel.setPreferredSize(new Dimension(48, 48));
+        warningIconPanel.setBackground(BG_COLOR);
+        content.add(warningIconPanel, BorderLayout.WEST);
+        
+        JPanel textPanel = new JPanel();
+        textPanel.setLayout(new BoxLayout(textPanel, BoxLayout.Y_AXIS));
+        textPanel.setBackground(BG_COLOR);
+        
+        JLabel messageLabel = new JLabel("delete " + name.toLowerCase() + "?");
+        messageLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        messageLabel.setForeground(TEXT_PRIMARY);
+        messageLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        textPanel.add(messageLabel);
+        textPanel.add(Box.createVerticalStrut(6));
+        
+        JLabel subtextLabel = new JLabel("<html><body style='width: 250px;'>This action is permanent and cannot be reversed. All associated logs will be purged.</body></html>");
+        subtextLabel.setFont(fontBody);
+        subtextLabel.setForeground(TEXT_MUTED);
+        subtextLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        textPanel.add(subtextLabel);
+        textPanel.add(Box.createVerticalStrut(12));
+        
+        // Detail Metadata Panel
+        JPanel detailBox = new JPanel(new BorderLayout());
+        detailBox.setBackground(new Color(0x0d, 0x0e, 0x0f));
+        detailBox.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(0x3D, 0x3D, 0x3D), 1),
+            BorderFactory.createEmptyBorder(6, 10, 6, 10)
+        ));
+        detailBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        
+        JLabel idLabel = new JLabel("ID: " + id.toUpperCase());
+        idLabel.setFont(new Font("Consolas", Font.PLAIN, 11));
+        idLabel.setForeground(TEXT_MUTED);
+        detailBox.add(idLabel, BorderLayout.WEST);
+        
+        JLabel typeLabel = new JLabel("TYPE: " + type.toUpperCase());
+        typeLabel.setFont(new Font("Consolas", Font.PLAIN, 11));
+        typeLabel.setForeground(TEXT_MUTED);
+        detailBox.add(typeLabel, BorderLayout.EAST);
+        
+        textPanel.add(detailBox);
+        content.add(textPanel, BorderLayout.CENTER);
+        dialog.add(content, BorderLayout.CENTER);
+        
+        // Action Buttons Footer
+        JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 12));
+        footer.setBackground(new Color(0x1b, 0x1c, 0x1c));
+        footer.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, BORDER_COLOR));
+        
+        JButton noBtn = new JButton("No");
+        styleDialogButton(noBtn, false);
+        noBtn.addActionListener(e -> {
+            dialog.setVisible(false);
+            dialog.dispose();
+        });
+        footer.add(noBtn);
+        
+        JButton yesBtn = new JButton("Yes");
+        styleDialogButton(yesBtn, true);
+        yesBtn.addActionListener(e -> {
+            onConfirm.run();
+            dialog.setVisible(false);
+            dialog.dispose();
+        });
+        footer.add(yesBtn);
+        
+        dialog.add(footer, BorderLayout.SOUTH);
+        dialog.getRootPane().setBorder(BorderFactory.createLineBorder(BORDER_COLOR, 1));
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
+    }
+
+    private void showWhitelistDialog(AppConfig.WhitelistEntry entry, boolean isEdit, int selectedIdx) {
+        JDialog dialog = new JDialog(this, isEdit ? "edit whitelist entry" : "add whitelist entry", true);
+        dialog.setUndecorated(true);
+        dialog.setSize(470, 310);
+        dialog.setLayout(new BorderLayout());
+        dialog.getContentPane().setBackground(BG_COLOR);
+        
+        JPanel titleBar = createCustomTitleBar(dialog, isEdit ? "edit whitelist entry" : "add whitelist entry", false);
+        dialog.add(titleBar, BorderLayout.NORTH);
+        
+        JPanel content = new JPanel();
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setBackground(BG_COLOR);
+        content.setBorder(BorderFactory.createEmptyBorder(16, 24, 16, 24));
+        
+        JLabel nameLabel = new JLabel("NAME (E.G. GOOGLE MEET)");
+        nameLabel.setFont(new Font("Consolas", Font.PLAIN, 11));
+        nameLabel.setForeground(TEXT_MUTED);
+        nameLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        content.add(nameLabel);
+        content.add(Box.createVerticalStrut(4));
+        
+        JTextField nameField = new JTextField(isEdit ? entry.name : "");
+        styleDialogTextField(nameField);
+        nameField.setAlignmentX(Component.LEFT_ALIGNMENT);
+        content.add(nameField);
+        content.add(Box.createVerticalStrut(12));
+        
+        JLabel urlLabel = new JLabel("BASE URL (E.G. MEET.GOOGLE.COM)");
+        urlLabel.setFont(new Font("Consolas", Font.PLAIN, 11));
+        urlLabel.setForeground(TEXT_MUTED);
+        urlLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        content.add(urlLabel);
+        content.add(Box.createVerticalStrut(4));
+        
+        JTextField urlField = new JTextField(isEdit ? entry.baseUrl : "");
+        styleDialogTextField(urlField);
+        urlField.setAlignmentX(Component.LEFT_ALIGNMENT);
+        content.add(urlField);
+        content.add(Box.createVerticalStrut(12));
+        
+        JCheckBox requirePatternCheckBox = new JCheckBox("require room/meeting pattern (auto-regex)", isEdit ? entry.hasParameter : true);
+        requirePatternCheckBox.setFont(fontBody);
+        requirePatternCheckBox.setBackground(BG_COLOR);
+        requirePatternCheckBox.setForeground(TEXT_PRIMARY);
+        requirePatternCheckBox.setFocusPainted(false);
+        requirePatternCheckBox.setIcon(new CustomCheckboxIcon(false));
+        requirePatternCheckBox.setSelectedIcon(new CustomCheckboxIcon(true));
+        requirePatternCheckBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        content.add(requirePatternCheckBox);
+        content.add(Box.createVerticalStrut(4));
+        
+        JLabel patternDesc = new JLabel("Strict validation for dynamic meeting identifiers.");
+        patternDesc.setFont(fontMuted);
+        patternDesc.setForeground(TEXT_MUTED);
+        patternDesc.setAlignmentX(Component.LEFT_ALIGNMENT);
+        patternDesc.setBorder(BorderFactory.createEmptyBorder(0, 22, 0, 0));
+        content.add(patternDesc);
+        
+        dialog.add(content, BorderLayout.CENTER);
+        
+        // Footer Buttons
+        JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 12));
+        footer.setBackground(new Color(0x1b, 0x1c, 0x1c));
+        footer.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, BORDER_COLOR));
+        
+        JButton cancelBtn = new JButton("Cancel");
+        styleDialogButton(cancelBtn, false);
+        cancelBtn.addActionListener(e -> {
+            dialog.setVisible(false);
+            dialog.dispose();
+        });
+        footer.add(cancelBtn);
+        
+        JButton okBtn = new JButton("OK");
+        styleDialogButton(okBtn, true);
+        okBtn.addActionListener(e -> {
+            String name = nameField.getText().trim();
+            String host = urlField.getText().trim();
+            boolean requirePattern = requirePatternCheckBox.isSelected();
+            
+            if (name.isEmpty() || host.isEmpty()) {
+                showTextDialog("name and base url cannot be empty.", "error", true);
+                return;
+            }
+            
+            AppConfig config = ConfigManager.getConfig();
+            if (isEdit) {
+                entry.name = name;
+                entry.baseUrl = host;
+                entry.hasParameter = requirePattern;
+                entry.parameterPattern = requirePattern ? getAutomaticPattern(host) : "";
+            } else {
+                AppConfig.WhitelistEntry newEntry = new AppConfig.WhitelistEntry();
+                newEntry.id = Long.toString(System.currentTimeMillis()) + "_" + (int)(Math.random() * 1000);
+                newEntry.name = name;
+                newEntry.baseUrl = host;
+                newEntry.hasParameter = requirePattern;
+                newEntry.parameterPattern = requirePattern ? getAutomaticPattern(host) : "";
+                newEntry.enabled = true;
+                config.whitelist.add(newEntry);
+            }
+            ConfigManager.saveConfig();
+            log((isEdit ? "edited" : "added") + " whitelist: " + name.toLowerCase());
+            rebuildWhitelistRows();
+            
+            dialog.setVisible(false);
+            dialog.dispose();
+        });
+        footer.add(okBtn);
+        
+        dialog.add(footer, BorderLayout.SOUTH);
+        dialog.getRootPane().setBorder(BorderFactory.createLineBorder(BORDER_COLOR, 1));
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
+    }
+
+    private void showOpenChooser() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        AppConfig config = ConfigManager.getConfig();
+        chooser.setCurrentDirectory(new File(config.rootDir));
+        
+        JDialog dialog = new JDialog(this, "open", true);
+        dialog.setUndecorated(true);
+        dialog.setSize(600, 420);
+        dialog.setLayout(new BorderLayout());
+        dialog.getContentPane().setBackground(BG_COLOR);
+        
+        JPanel titleBar = createCustomTitleBar(dialog, "open", false);
+        dialog.add(titleBar, BorderLayout.NORTH);
+        dialog.add(chooser, BorderLayout.CENTER);
+        
+        chooser.addActionListener(evt -> {
+            if (evt.getActionCommand().equals(JFileChooser.APPROVE_SELECTION)) {
+                String path = chooser.getSelectedFile().getAbsolutePath();
+                folderPathLabel.setText(path);
+                config.rootDir = path;
+                ConfigManager.saveConfig();
+                log("save directory updated to: " + path);
+                dialog.setVisible(false);
+                dialog.dispose();
+            } else if (evt.getActionCommand().equals(JFileChooser.CANCEL_SELECTION)) {
+                dialog.setVisible(false);
+                dialog.dispose();
+            }
+        });
+        
+        dialog.getRootPane().setBorder(BorderFactory.createLineBorder(BORDER_COLOR, 1));
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
+    }
+
+    private void showTextDialog(String message, String title, boolean isError) {
+        JDialog dialog = new JDialog(this, title, true);
+        dialog.setUndecorated(true);
+        dialog.setSize(340, 160);
+        dialog.setLayout(new BorderLayout());
+        dialog.getContentPane().setBackground(BG_COLOR);
+        
+        JPanel titleBar = createCustomTitleBar(dialog, title, false);
+        dialog.add(titleBar, BorderLayout.NORTH);
+        
+        JPanel content = new JPanel();
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setBackground(BG_COLOR);
+        content.setBorder(BorderFactory.createEmptyBorder(16, 24, 16, 24));
+        
+        JLabel msgLabel = new JLabel("<html><body style='width: 280px;'>" + message + "</body></html>");
+        msgLabel.setFont(fontBody);
+        msgLabel.setForeground(TEXT_PRIMARY);
+        msgLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        content.add(msgLabel);
+        
+        dialog.add(content, BorderLayout.CENTER);
+        
+        JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 12));
+        footer.setBackground(new Color(0x1b, 0x1c, 0x1c));
+        footer.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, BORDER_COLOR));
+        
+        JButton okBtn = new JButton("OK");
+        styleDialogButton(okBtn, true);
+        okBtn.addActionListener(e -> {
+            dialog.setVisible(false);
+            dialog.dispose();
+        });
+        footer.add(okBtn);
+        
+        dialog.add(footer, BorderLayout.SOUTH);
+        dialog.getRootPane().setBorder(BorderFactory.createLineBorder(BORDER_COLOR, 1));
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
+    }
+
+    private void styleDialogTextField(JTextField tf) {
+        tf.setBackground(new Color(0x0d, 0x0e, 0x0f));
+        tf.setForeground(TEXT_PRIMARY);
+        tf.setCaretColor(TEXT_PRIMARY);
+        tf.setFont(fontLabel);
+        tf.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(0x3D, 0x3D, 0x3D), 1),
+            BorderFactory.createEmptyBorder(6, 10, 6, 10)
+        ));
+        tf.setMaximumSize(new Dimension(420, 32));
+        tf.setPreferredSize(new Dimension(420, 32));
+    }
+
+    private void styleDialogButton(JButton btn, boolean primary) {
+        btn.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        btn.setPreferredSize(new Dimension(90, 30));
+        btn.setFocusPainted(false);
+        btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        
+        if (primary) {
+            btn.setBackground(TEXT_PRIMARY);
+            btn.setForeground(BG_COLOR);
+            btn.setBorder(BorderFactory.createLineBorder(TEXT_PRIMARY, 1));
+            btn.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseEntered(MouseEvent e) {
+                    btn.setBackground(TEXT_MUTED);
+                }
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    btn.setBackground(TEXT_PRIMARY);
+                }
+            });
+        } else {
+            btn.setBackground(BG_COLOR);
+            btn.setForeground(TEXT_PRIMARY);
+            btn.setBorder(BorderFactory.createLineBorder(new Color(0x3D, 0x3D, 0x3D), 1));
+            btn.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseEntered(MouseEvent e) {
+                    btn.setBackground(CARD_BG_COLOR);
+                }
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    btn.setBackground(BG_COLOR);
+                }
+            });
+        }
+    }
+
+    public static class FrameResizeListener extends MouseAdapter {
+        private final JFrame frame;
+        private final int borderSize = 6;
+        private int dragType = 0;
+        private Point startPos;
+        private Rectangle startBounds;
+
+        public FrameResizeListener(JFrame frame) {
+            this.frame = frame;
+        }
+
+        @Override
+        public void mouseMoved(MouseEvent e) {
+            if (frame.getExtendedState() == Frame.MAXIMIZED_BOTH) {
+                frame.setCursor(Cursor.getDefaultCursor());
+                return;
+            }
+            Point p = e.getPoint();
+            int w = frame.getWidth();
+            int h = frame.getHeight();
+            int cursorType = Cursor.DEFAULT_CURSOR;
+
+            if (p.x < borderSize) {
+                if (p.y < borderSize) cursorType = Cursor.NW_RESIZE_CURSOR;
+                else if (p.y > h - borderSize) cursorType = Cursor.SW_RESIZE_CURSOR;
+                else cursorType = Cursor.W_RESIZE_CURSOR;
+            } else if (p.x > w - borderSize) {
+                if (p.y < borderSize) cursorType = Cursor.NE_RESIZE_CURSOR;
+                else if (p.y > h - borderSize) cursorType = Cursor.SE_RESIZE_CURSOR;
+                else cursorType = Cursor.E_RESIZE_CURSOR;
+            } else if (p.y < borderSize) {
+                cursorType = Cursor.N_RESIZE_CURSOR;
+            } else if (p.y > h - borderSize) {
+                cursorType = Cursor.S_RESIZE_CURSOR;
+            }
+
+            frame.setCursor(Cursor.getPredefinedCursor(cursorType));
+        }
+
+        @Override
+        public void mousePressed(MouseEvent e) {
+            if (frame.getExtendedState() == Frame.MAXIMIZED_BOTH) {
+                dragType = 0;
+                return;
+            }
+            startPos = e.getLocationOnScreen();
+            startBounds = frame.getBounds();
+            
+            Point p = e.getPoint();
+            int w = frame.getWidth();
+            int h = frame.getHeight();
+            dragType = 0;
+
+            if (p.x < borderSize) {
+                if (p.y < borderSize) dragType = Cursor.NW_RESIZE_CURSOR;
+                else if (p.y > h - borderSize) dragType = Cursor.SW_RESIZE_CURSOR;
+                else dragType = Cursor.W_RESIZE_CURSOR;
+            } else if (p.x > w - borderSize) {
+                if (p.y < borderSize) dragType = Cursor.NE_RESIZE_CURSOR;
+                else if (p.y > h - borderSize) dragType = Cursor.SE_RESIZE_CURSOR;
+                else dragType = Cursor.E_RESIZE_CURSOR;
+            } else if (p.y < borderSize) {
+                dragType = Cursor.N_RESIZE_CURSOR;
+            } else if (p.y > h - borderSize) {
+                dragType = Cursor.S_RESIZE_CURSOR;
+            }
+        }
+
+        @Override
+        public void mouseDragged(MouseEvent e) {
+            if (frame.getExtendedState() == Frame.MAXIMIZED_BOTH) {
+                return;
+            }
+            if (dragType == 0) return;
+
+            Point currPos = e.getLocationOnScreen();
+            int dx = currPos.x - startPos.x;
+            int dy = currPos.y - startPos.y;
+
+            int newX = startBounds.x;
+            int newY = startBounds.y;
+            int newW = startBounds.width;
+            int newH = startBounds.height;
+
+            Dimension minSize = frame.getMinimumSize();
+            if (minSize == null) minSize = new Dimension(100, 100);
+
+            if (dragType == Cursor.E_RESIZE_CURSOR || dragType == Cursor.NE_RESIZE_CURSOR || dragType == Cursor.SE_RESIZE_CURSOR) {
+                newW = Math.max(minSize.width, startBounds.width + dx);
+            }
+            if (dragType == Cursor.S_RESIZE_CURSOR || dragType == Cursor.SW_RESIZE_CURSOR || dragType == Cursor.SE_RESIZE_CURSOR) {
+                newH = Math.max(minSize.height, startBounds.height + dy);
+            }
+            if (dragType == Cursor.W_RESIZE_CURSOR || dragType == Cursor.NW_RESIZE_CURSOR || dragType == Cursor.SW_RESIZE_CURSOR) {
+                int potentialW = startBounds.width - dx;
+                if (potentialW >= minSize.width) {
+                    newX = startBounds.x + dx;
+                    newW = potentialW;
+                }
+            }
+            if (dragType == Cursor.N_RESIZE_CURSOR || dragType == Cursor.NW_RESIZE_CURSOR || dragType == Cursor.NE_RESIZE_CURSOR) {
+                int potentialH = startBounds.height - dy;
+                if (potentialH >= minSize.height) {
+                    newY = startBounds.y + dy;
+                    newH = potentialH;
+                }
+            }
+
+            frame.setBounds(newX, newY, newW, newH);
+            frame.validate();
+        }
+        
+        @Override
+        public void mouseExited(MouseEvent e) {
+            frame.setCursor(Cursor.getDefaultCursor());
         }
     }
 }

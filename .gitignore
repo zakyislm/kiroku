@@ -8,3 +8,8 @@ target/
 .agents/
 *.log
 rev/
+build_exe.ps1
+build.bat
+uninstall.bat
+resources/
+.gitignore
